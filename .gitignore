@@ -1,0 +1,10 @@
+# 密钥，绝不能提交 / secrets — never commit
+.turn.env
+*.env
+
+# 运行时生成 / generated at runtime
+.tunnel-url
+virtual-display
+node_modules/
+.DS_Store
+.turn.skip

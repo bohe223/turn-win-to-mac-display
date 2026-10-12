@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>推流端 · turn-win-to-mac-display</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --text:#1d1f23; --muted:#6b7079; --line:#e3e5e9; --accent:#2f6fed; --ok:#1f9d55; --warn:#b7791f; --code:#f2f3f5; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#15171b; --card:#1e2126; --text:#e8eaed; --muted:#9aa0a8; --line:#2e3238; --accent:#5b8cff; --ok:#4ade80; --warn:#f6c453; --code:#2a2e35; }
+  }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.55 -apple-system, "PingFang SC", "Segoe UI", sans-serif; background: var(--bg); color: var(--text);
+    max-width: 780px; margin: 0 auto; padding: 28px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 14px; }
+  .label { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+  .url { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .url code { font: 600 17px ui-monospace, Menlo, monospace; background: var(--code); padding: 8px 10px; border-radius: 8px;
+    word-break: break-all; user-select: all; flex: 1; min-width: 0; }
+  .small code { font-size: 13px; font-weight: 400; padding: 3px 6px; }
+  button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  ol { margin: 6px 0 0; padding-left: 20px; } li { margin: 3px 0; }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid currentColor; margin-left: 6px; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); }
+  label { margin-right: 14px; display: inline-block; margin-bottom: 6px; }
+  select { font: inherit; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  video { width: 100%; background: #000; margin-top: 12px; border-radius: 8px; }
+  #status { margin-top: 10px; color: var(--muted); }
+  details summary { cursor: pointer; color: var(--muted); }
+</style>
+</head>
+<body>
+<h1>turn-win-to-mac-display · 推流端 Sender</h1>
+
+<div class="card">
+  <div class="label">① 在 Windows（或任何另一台电脑）的浏览器里打开 / Open this on the other computer:</div>
+  <div class="url"><code id="mainUrl">正在获取…</code><button id="copyMain">复制 Copy</button></div>
+  <p class="label" id="mainNote" style="margin:8px 0 0"></p>
+  <details style="margin-top:10px"><summary>其他地址 / Other addresses</summary>
+    <div class="small" style="margin-top:6px">同一网络 / Same network：<span id="urls">…</span></div>
+    <div class="small" id="pubRow" hidden style="margin-top:4px">公网 / Public：<code id="pub"></code></div>
+  </details>
+</div>
+
+<div class="card">
+  <div class="label">② 开始推流 / Start sharing <span id="turnTag" class="tag"></span></div>
+  <ol>
+    <li>点下面的「选择屏幕并开始」/ Click the button below.</li>
+    <li>在弹窗里选「整个屏幕」→「<b>Windows Display</b>」（虚拟显示器）/ Pick the <b>Windows Display</b> screen.</li>
+    <li>把窗口拖到这块新屏幕上（在「系统设置 → 显示器」可调整位置）/ Drag windows onto it.</li>
+  </ol>
+  <p style="margin:14px 0 6px">
+    <label>模式 Mode <select id="lat"><option value="quality" selected>清晰优先 Sharp</option><option value="latency">流畅优先 Smooth</option></select></label>
+    <label>帧率 FPS <select id="fps"><option>30</option><option selected>60</option></select></label>
+    <label>码率 Bitrate <select id="br"><option value="8">8 Mbps</option><option value="15" selected>15 Mbps</option><option value="30">30 Mbps</option></select></label>
+  </p>
+  <details><summary>备用模式（极少用到）/ Fallback mode</summary>
+    <p style="margin:8px 0 0">
+      <label>画质 Quality <select id="q"><option value="0.6">低 Low</option><option value="0.75" selected>中 Mid</option><option value="0.9">高 High</option></select></label>
+      <label>分辨率 Scale <select id="scale"><option value="1" selected>100%</option><option value="0.75">75%</option><option value="0.5">50%</option></select></label>
+    </p>
+  </details>
+  <p style="margin:14px 0 0"><button id="start" class="primary">选择屏幕并开始 / Choose screen &amp; start</button> <button id="stop" disabled>停止 Stop</button></p>
+  <div id="status">未开始 / Not started.</div>
+  <video id="preview" autoplay muted playsinline></video>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const peers = new Map(); // viewerId -> RTCPeerConnection
+let stream = null;
+let viewerIds = new Set();
+let mjpegCount = 0;
+let pumping = false;
+
+// ---- 备用模式（MJPEG）：Windows 端 WebRTC 连不上时自动启用 ----
+// 用 MediaStreamTrackProcessor 逐帧读取，不受后台标签页的定时器节流影响
+async function pumpMjpeg() {
+  if (pumping || !stream || mjpegCount === 0) return;
+  pumping = true;
+  const track = stream.getVideoTracks()[0].clone();
+  const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+  const canvas = new OffscreenCanvas(1, 1);
+  const ctx = canvas.getContext('2d');
+  let last = 0;
+  try {
+    while (stream && mjpegCount > 0) {
+      const { value: frame, done } = await reader.read();
+      if (done) break;
+      const now = performance.now();
+      if (now - last < 1000 / +$('fps').value) { frame.close(); continue; }
+      last = now;
+      const k = +$('scale').value;
+      const w = Math.round(frame.displayWidth * k), h = Math.round(frame.displayHeight * k);
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      ctx.drawImage(frame, 0, 0, w, h);
+      frame.close();
+      const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: +$('q').value });
+      await fetch('/frame', { method: 'POST', body: blob }).catch(() => {});
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+    track.stop();
+    pumping = false;
+  }
+}
+
+async function refreshInfo() {
+  const info = await fetch('/info').then(r => r.json()).catch(() => null);
+  if (!info) { $('mainUrl').textContent = '无法连接本机服务，请确认 start.sh 还在运行 / Local server not running'; return; }
+  const { urls, publicUrl, turn } = info;
+  $('urls').innerHTML = urls.map(u => `<code>${u}</code>`).join(' / ') || '无 / none';
+  $('pubRow').hidden = !publicUrl;
+  if (publicUrl) $('pub').textContent = publicUrl;
+  // 有公网地址就优先显示它（任何网络都能打开），否则显示局域网地址
+  const main = publicUrl || urls[0] || '';
+  if ($('mainUrl').textContent !== main) $('mainUrl').textContent = main || '没有可用的网络地址 / No network address';
+  $('mainNote').textContent = publicUrl
+    ? '公网地址：任何网络都能打开。免费隧道偶尔会换网址，以这里显示的为准（已打开的画面不受影响）。/ Works from any network; this page always shows the current URL.'
+    : '局域网地址：两台电脑需在同一网络。想跨网络使用，启动时不要加 --lan。/ Same network only (started with --lan).';
+  $('turnTag').className = 'tag ' + (turn ? 'ok' : 'warn');
+  $('turnTag').textContent = turn ? 'TURN 已配置 ✓' : '未配置 TURN：跨网络可能很卡（运行 ./setup-turn.sh）';
+}
+$('copyMain').onclick = () => navigator.clipboard.writeText($('mainUrl').textContent)
+  .then(() => { $('copyMain').textContent = '已复制 ✓'; setTimeout(() => $('copyMain').textContent = '复制 Copy', 1500); });
+refreshInfo();
+setInterval(refreshInfo, 5000);
+
+const post = (msg) => fetch('/signal', { method: 'POST', body: JSON.stringify(msg) });
+
+function updateStatus() {
+  const n = [...peers.values()].filter(p => p.connectionState === 'connected').length;
+  for (const [id, p] of peers) if (p.connectionState === 'closed') peers.delete(id);
+  $('status').textContent = stream
+    ? `推流中 · WebRTC 已连接 ${n} 个 · 备用模式观看 ${mjpegCount} 个`
+    : `未推流 · 等待中的观看端 ${viewerIds.size} 个`;
+}
+
+// 查当前实际使用的连接路径：host=局域网直连，srflx/prflx=跨网直连，relay=TURN 中转
+async function currentPath(pc) {
+  const st = await pc.getStats();
+  let pair = null;
+  st.forEach(r => { if (r.type === 'transport' && r.selectedCandidatePairId) pair = st.get(r.selectedCandidatePairId); });
+  if (!pair) st.forEach(r => { if (r.type === 'candidate-pair' && r.state === 'succeeded' && (!pair || r.bytesReceived + r.bytesSent > pair.bytesReceived + pair.bytesSent)) pair = r; });
+  if (!pair) return null;
+  const l = st.get(pair.localCandidateId), rm = st.get(pair.remoteCandidateId);
+  const relay = l?.candidateType === 'relay' || rm?.candidateType === 'relay';
+  const lan = !relay && l?.candidateType === 'host' && rm?.candidateType === 'host';
+  return { label: relay ? 'TURN 中转' : lan ? '局域网直连' : '跨网直连',
+           detail: `本端 ${l?.candidateType}/${l?.protocol} ⇄ 对端 ${rm?.candidateType}/${rm?.protocol}${l?.relayProtocol ? '（TURN 走 ' + l.relayProtocol + '）' : ''}` };
+}
+
+async function connectViewer(id) {
+  closeViewer(id);
+  if (!stream) return;
+  const { iceServers } = await fetch('/ice').then(r => r.json()).catch(() => ({ iceServers: [] }));
+  const pc = new RTCPeerConnection({ iceServers });
+  peers.set(id, pc);
+  const types = new Set();
+  pc.onicecandidate = (e) => {
+    if (e.candidate) { types.add(e.candidate.type + '/' + e.candidate.protocol); post({ to: id, type: 'candidate', candidate: e.candidate }); }
+    else post({ to: 'log', text: `Mac 网络候选: ${[...types].join(', ') || '无'}（srflx=可尝试跨网直连，relay=TURN 中转可用）` });
+  };
+  pc.onicecandidateerror = (e) => post({ to: 'log', text: `Mac STUN 出错 ${e.url || ''} ${e.errorCode} ${e.errorText || ''}` });
+  pc.oniceconnectionstatechange = () => post({ to: 'log', text: `与观看端 ${id.slice(0, 8)} 的 ICE 状态: ${pc.iceConnectionState}` });
+  let lastPath = '';
+  const checkPath = async () => {
+    if (peers.get(id) !== pc || pc.connectionState === 'closed') return;
+    const p = pc.connectionState === 'connected' ? await currentPath(pc).catch(() => null) : null;
+    if (p && p.detail !== lastPath) { lastPath = p.detail; post({ to: 'log', text: `与观看端 ${id.slice(0, 8)} 的连接路径: ${p.label} — ${p.detail}` }); }
+    setTimeout(checkPath, 5000);
+  };
+  setTimeout(checkPath, 2000);
+  pc.onconnectionstatechange = () => {
+    updateStatus();
+    if (pc.connectionState === 'connected') pc.getSenders().forEach(s => s.track && applyTuning(s));
+    if (pc.connectionState === 'failed' && !viewerIds.has(id)) closeViewer(id);
+    if (pc.connectionState === 'disconnected' && !viewerIds.has(id))
+      setTimeout(() => pc.connectionState !== 'connected' && closeViewer(id), 15000);
+  };
+
+  const track = stream.getVideoTracks()[0];
+  const sender = pc.addTrack(track, stream);
+
+  // 优先 H.264（大多数电脑有硬件编解码），其次 VP9/VP8
+  const tx = pc.getTransceivers().find(t => t.sender === sender);
+  const caps = RTCRtpSender.getCapabilities('video')?.codecs || [];
+  const rank = (c) => /h264/i.test(c.mimeType) ? 0 : /vp9/i.test(c.mimeType) ? 1 : /vp8/i.test(c.mimeType) ? 2 : 3;
+  try { tx.setCodecPreferences([...caps].sort((a, b) => rank(a) - rank(b))); } catch {}
+
+  await applyTuning(sender);
+  startStatsLog(id, pc);
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  post({ to: id, type: 'offer', sdp: pc.localDescription });
+}
+
+// 编码参数。流畅优先：网速不够时降清晰度保帧率，画面不在发送队列里排队（延迟低）；
+// 清晰优先：保分辨率、必要时丢帧，小字清楚但网速紧张时会更卡、延迟更高
+async function applyTuning(sender) {
+  const lowLatency = $('lat').value === 'latency';
+  const params = sender.getParameters();
+  params.degradationPreference = lowLatency ? 'maintain-framerate' : 'maintain-resolution';
+  params.encodings = (params.encodings.length ? params.encodings : [{}]).map(e => ({
+    ...e, maxBitrate: +$('br').value * 1e6, maxFramerate: +$('fps').value,
+  }));
+  await sender.setParameters(params).catch((e) => console.warn('setParameters', e));
+  if (sender.track) sender.track.contentHint = lowLatency ? 'motion' : 'detail';
+}
+// 改设置时对所有已连接的观看端立即生效，不用重连
+for (const id of ['lat', 'br', 'fps']) $(id).addEventListener('change', () => {
+  for (const pc of peers.values()) pc.getSenders().forEach(s => s.track && applyTuning(s));
+});
+
+// 每 10 秒把发送端的延迟相关数据写进服务器日志
+function startStatsLog(id, pc) {
+  let prev = null;
+  const tick = async () => {
+    if (peers.get(id) !== pc || pc.connectionState === 'closed') return;
+    const st = await pc.getStats().catch(() => null);
+    let out = null, pair = null;
+    st?.forEach(r => {
+      if (r.type === 'outbound-rtp' && r.kind === 'video') out = r;
+      if (r.type === 'transport' && r.selectedCandidatePairId) pair = st.get(r.selectedCandidatePairId);
+    });
+    if (out && prev && out.framesEncoded > prev.framesEncoded) {
+      const n = out.framesEncoded - prev.framesEncoded;
+      const enc = (out.totalEncodeTime - prev.totalEncodeTime) / n * 1000;
+      const pk = out.packetsSent - prev.packetsSent;
+      const pace = pk ? (out.totalPacketSendDelay - prev.totalPacketSendDelay) / pk * 1000 : 0;
+      const mbps = (out.bytesSent - prev.bytesSent) * 8 / 10 / 1e6;
+      post({ to: 'log', text: `[发送统计 ${id.slice(0, 8)}] ${out.frameWidth}×${out.frameHeight} ${(n / 10).toFixed(0)}fps · 编码 ${enc.toFixed(1)}ms · 发送排队 ${pace.toFixed(1)}ms · ${mbps.toFixed(1)}Mbps`
+        + ` · 估计可用带宽 ${pair?.availableOutgoingBitrate ? (pair.availableOutgoingBitrate / 1e6).toFixed(1) + 'Mbps' : '?'}`
+        + ` · RTT ${pair?.currentRoundTripTime != null ? Math.round(pair.currentRoundTripTime * 1000) + 'ms' : '?'}`
+        + ` · 受限原因 ${out.qualityLimitationReason} · 编码器 ${out.encoderImplementation || '?'}` });
+    }
+    if (out) prev = out;
+    setTimeout(tick, 10000);
+  };
+  setTimeout(tick, 10000);
+}
+
+function closeViewer(id) {
+  peers.get(id)?.close();
+  peers.delete(id);
+}
+
+const es = new EventSource('/events?role=sender');
+es.onmessage = async (e) => {
+  const msg = JSON.parse(e.data);
+  switch (msg.type) {
+    case 'viewers': viewerIds = new Set(msg.ids); viewerIds.forEach(connectViewer); break;
+    case 'viewer-joined': viewerIds.add(msg.id); connectViewer(msg.id); break;
+    case 'viewer-left': {
+      // 观看端的信令断了（多半是免费隧道换了网址），但视频连接是独立的：还连着就保留，断了再清理
+      viewerIds.delete(msg.id);
+      const p = peers.get(msg.id);
+      if (!p || p.connectionState !== 'connected') closeViewer(msg.id);
+      break;
+    }
+    case 'answer': await peers.get(msg.from)?.setRemoteDescription(msg.sdp); break;
+    case 'candidate': await peers.get(msg.from)?.addIceCandidate(msg.candidate).catch(() => {}); break;
+    case 'mjpeg': mjpegCount = msg.count; pumpMjpeg(); break;
+    case 'replaced': es.close(); $('status').textContent = '另一个推流页面已接管，本页已停用。'; break;
+  }
+  updateStatus();
+};
+
+$('start').onclick = async () => {
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: +$('fps').value, cursor: 'always', displaySurface: 'monitor' },
+      audio: false,
+      selfBrowserSurface: 'exclude',
+      monitorTypeSurfaces: 'include',
+    });
+  } catch (err) {
+    $('status').textContent = '未获得屏幕权限：' + err.message;
+    return;
+  }
+  const track = stream.getVideoTracks()[0];
+  track.contentHint = $('lat').value === 'latency' ? 'motion' : 'detail';
+  track.onended = stop;
+  $('preview').srcObject = stream;
+  $('start').disabled = true; $('stop').disabled = false;
+  viewerIds.forEach(connectViewer);
+  pumpMjpeg();
+  updateStatus();
+};
+
+function stop() {
+  stream?.getTracks().forEach(t => t.stop());
+  stream = null;
+  for (const id of [...peers.keys()]) { closeViewer(id); post({ to: id, type: 'stopped' }); }
+  $('preview').srcObject = null;
+  $('start').disabled = false; $('stop').disabled = true;
+  updateStatus();
+}
+$('stop').onclick = stop;
+</script>
+</body>
+</html>

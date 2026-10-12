@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mac 显示器</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  video, #img { width: 100vw; height: 100vh; object-fit: contain; display: block; }
+  #img { display: none; }
+  body.mjpeg video { display: none; }
+  body.mjpeg #img { display: block; }
+  #overlay {
+    position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #ddd; font: 16px "Segoe UI", -apple-system, "Microsoft YaHei", sans-serif; gap: 16px; text-align: center;
+  }
+  #overlay button { font-size: 18px; padding: 10px 28px; cursor: pointer; border-radius: 6px; border: 0; }
+  #hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); color: #888;
+    font: 13px "Segoe UI", sans-serif; transition: opacity .5s; pointer-events: none; }
+  body.playing #overlay { display: none; }
+  body.playing.idle { cursor: none; }
+  body.playing.idle #hint { opacity: 0; }
+  #stats { position: fixed; top: 8px; right: 10px; color: #8f8; font: 12px Consolas, monospace;
+    background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 4px; transition: opacity .5s; }
+  body.idle #stats { opacity: 0; }
+</style>
+</head>
+<body>
+<video id="v" autoplay muted playsinline></video>
+<img id="img" alt="">
+<div id="overlay"><div id="msg">正在连接…</div><button id="fs">全屏显示</button></div>
+<div id="stats"></div>
+<div id="hint">双击或按 F 全屏 · Esc 退出</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const key = new URLSearchParams(location.search).get('k') || '';
+const video = $('v');
+let myId = null, pc = null, fallbackTimer = null;
+const icePromise = fetch('/ice?k=' + encodeURIComponent(key)).then(r => r.json()).catch(() => ({ iceServers: [] }));
+let mjpeg = new URLSearchParams(location.search).get('mode') === 'mjpeg';
+
+
+// 查当前实际使用的连接路径：host=局域网直连，srflx/prflx=跨网直连，relay=TURN 中转
+async function currentPath(pc) {
+  const st = await pc.getStats();
+  let pair = null;
+  st.forEach(r => { if (r.type === 'transport' && r.selectedCandidatePairId) pair = st.get(r.selectedCandidatePairId); });
+  if (!pair) st.forEach(r => { if (r.type === 'candidate-pair' && r.state === 'succeeded' && (!pair || r.bytesReceived + r.bytesSent > pair.bytesReceived + pair.bytesSent)) pair = r; });
+  if (!pair) return null;
+  const l = st.get(pair.localCandidateId), rm = st.get(pair.remoteCandidateId);
+  const relay = l?.candidateType === 'relay' || rm?.candidateType === 'relay';
+  const lan = !relay && l?.candidateType === 'host' && rm?.candidateType === 'host';
+  return { label: relay ? 'TURN 中转' : lan ? '局域网直连' : '跨网直连',
+           detail: `本端 ${l?.candidateType}/${l?.protocol} ⇄ 对端 ${rm?.candidateType}/${rm?.protocol}${l?.relayProtocol ? '（TURN 走 ' + l.relayProtocol + '）' : ''}` };
+}
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const vlog = (text) => { console.log(text); myId && post({ type: 'log', text }); };
+
+// 帧率统计（右上角显示当前模式和帧率，方便判断）
+let frames = 0, mode = '连接中';
+// 每秒从 WebRTC 统计里算出各环节延迟，显示在右上角；每 10 秒写一次服务器日志
+let prevIn = null, statTicks = 0;
+setInterval(async () => {
+  let text = `${mode} · ${frames} fps`;
+  if (pc && pc.connectionState === 'connected') {
+    const st = await pc.getStats().catch(() => null);
+    let inb = null, pair = null;
+    st?.forEach(r => {
+      if (r.type === 'inbound-rtp' && r.kind === 'video') inb = r;
+      if (r.type === 'transport' && r.selectedCandidatePairId) pair = st.get(r.selectedCandidatePairId);
+    });
+    if (inb && prevIn && inb.framesDecoded > prevIn.framesDecoded) {
+      const n = inb.framesDecoded - prevIn.framesDecoded;
+      const jbN = inb.jitterBufferEmittedCount - prevIn.jitterBufferEmittedCount;
+      const jb = jbN ? (inb.jitterBufferDelay - prevIn.jitterBufferDelay) / jbN * 1000 : 0;
+      const dec = (inb.totalDecodeTime - prevIn.totalDecodeTime) / n * 1000;
+      const rtt = pair?.currentRoundTripTime != null ? pair.currentRoundTripTime * 1000 : null;
+      const mbps = (inb.bytesReceived - prevIn.bytesReceived) * 8 / 1e6;
+      const fps = inb.framesPerSecond || n;
+      // 估算：采集约 1 帧 + 网络单程(RTT/2) + 缓冲 + 解码 + 显示约 1 帧（不含 Mac 编码，通常几毫秒）
+      const est = 1000 / Math.max(fps, 1) * 2 + (rtt ?? 0) / 2 + jb + dec;
+      text = `${mode} · ${inb.frameWidth}×${inb.frameHeight} ${Math.round(fps)}fps · ${mbps.toFixed(1)}Mbps`
+        + ` · 往返 ${rtt != null ? Math.round(rtt) : '?'}ms · 缓冲 ${Math.round(jb)}ms · 解码 ${dec.toFixed(1)}ms · 估算总延迟 ≈${Math.round(est)}ms`;
+      if (++statTicks % 10 === 0) vlog('[接收统计] ' + text + ` · 丢包 ${inb.packetsLost} · 解码器 ${inb.decoderImplementation || '?'}`);
+    }
+    if (inb) prevIn = inb;
+  }
+  $('stats').textContent = text;
+  frames = 0;
+}, 1000);
+(function countVideo() {
+  video.requestVideoFrameCallback?.(() => { frames++; countVideo(); });
+})();
+
+// 备用模式：循环向 Mac 要"最新一帧"，拿到一帧再要下一帧，不会在慢速网络里堆积旧画面
+async function startMjpeg(reason) {
+  if (document.body.classList.contains('mjpeg')) return;
+  vlog('切换到备用模式，原因：' + reason);
+  mjpeg = true; mode = '备用模式';
+  clearTimeout(fallbackTimer);
+  pc?.close(); pc = null; video.srcObject = null;
+  document.body.classList.add('mjpeg');
+  say('备用模式：等待 Mac 推流…');
+  const img = $('img');
+  const pollId = Math.random().toString(36).slice(2);
+  let after = 0, prevUrl = null;
+  while (true) {
+    try {
+      const r = await fetch(`/latest.jpg?k=${encodeURIComponent(key)}&id=${pollId}&after=${after}`, { cache: 'no-store' });
+      if (r.status === 200) {
+        after = Number(r.headers.get('X-Seq')) || after + 1;
+        const url = URL.createObjectURL(await r.blob());
+        await new Promise((ok) => { img.onload = img.onerror = ok; img.src = url; });
+        if (prevUrl) URL.revokeObjectURL(prevUrl);
+        prevUrl = url;
+        frames++;
+        document.body.classList.add('playing');
+      } else if (r.status !== 204) {
+        say('备用模式：连接 Mac 出错（' + r.status + '），重试中…'); await sleep(2000);
+      }
+    } catch { say('备用模式：网络中断，重试中…'); await sleep(2000); }
+  }
+}
+
+const post = (msg) => fetch('/signal?k=' + encodeURIComponent(key), { method: 'POST', body: JSON.stringify({ ...msg, to: 'sender', from: myId }) });
+const say = (t) => { $('msg').textContent = t; document.body.classList.remove('playing'); };
+
+function goFullscreen() { document.documentElement.requestFullscreen?.().catch(() => {}); }
+$('fs').onclick = goFullscreen;
+video.ondblclick = goFullscreen;
+$('img').ondblclick = goFullscreen;
+addEventListener('keydown', (e) => { if (e.key === 'f' || e.key === 'F') goFullscreen(); });
+
+// 鼠标静止 2 秒后隐藏光标和提示
+let idleTimer;
+addEventListener('mousemove', () => {
+  document.body.classList.remove('idle');
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => document.body.classList.add('idle'), 2000);
+});
+
+let lastPath = '';
+async function checkPath(conn) {
+  if (conn !== pc || conn.connectionState !== 'connected') return;
+  const p = await currentPath(conn).catch(() => null);
+  if (p) {
+    mode = p.label;
+    if (p.detail !== lastPath) { lastPath = p.detail; vlog(`连接路径: ${p.label} — ${p.detail}`); }
+  }
+  setTimeout(() => checkPath(conn), 5000);
+}
+
+async function handleOffer(sdp) {
+  pc?.close();
+  const { iceServers } = await icePromise; // 页面加载时已取好，这里不会真正等网络
+  // URL 加 &relay=1 可强制只走 TURN 中转（用于测试）
+  const relayOnly = new URLSearchParams(location.search).get('relay') === '1';
+  pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: relayOnly ? 'relay' : 'all' });
+  pc.onicecandidate = (e) => e.candidate
+    ? post({ type: 'candidate', candidate: e.candidate })
+    : vlog('本机网络候选收集完毕');
+  pc.onicecandidateerror = (e) => vlog(`STUN 出错 ${e.url || ''} ${e.errorCode} ${e.errorText || ''}`);
+  pc.ontrack = (e) => {
+    // 尽量降低延迟
+    try { e.receiver.jitterBufferTarget = 0; } catch {}
+    try { e.receiver.playoutDelayHint = 0; } catch {}
+    video.srcObject = e.streams[0] || new MediaStream([e.track]);
+    video.play().catch(() => {});
+    document.body.classList.add('playing');
+  };
+  pc.oniceconnectionstatechange = () => vlog('ICE 状态: ' + pc.iceConnectionState);
+  pc.onconnectionstatechange = () => {
+    vlog('WebRTC 状态: ' + pc.connectionState);
+    if (pc.connectionState === 'connected') checkPath(pc);
+    if (pc.connectionState === 'connected') clearTimeout(fallbackTimer);
+    if (pc.connectionState === 'failed') startMjpeg('WebRTC failed');
+    if (pc.connectionState === 'disconnected') say('连接中断，等待恢复…');
+  };
+  await pc.setRemoteDescription(sdp);
+  await pc.setLocalDescription(await pc.createAnswer());
+  post({ type: 'answer', sdp: pc.localDescription });
+}
+
+function connect() {
+  const es = new EventSource('/events?k=' + encodeURIComponent(key));
+  es.onmessage = async (e) => {
+    const msg = JSON.parse(e.data);
+    switch (msg.type) {
+      case 'hello': myId = msg.id; if (mjpeg) startMjpeg('forced'); else say(msg.senderOnline ? '等待 Mac 开始推流…' : 'Mac 端推流页面未打开'); break;
+      case 'offer':
+        if (mjpeg) break;
+        say('正在建立连接…');
+        // WebRTC 20 秒内连不上（含 TURN 中转）（直连线上常见），自动改用备用模式
+        clearTimeout(fallbackTimer);
+        fallbackTimer = setTimeout(() => pc?.connectionState !== 'connected' && startMjpeg('timeout'), 20000);
+        await handleOffer(msg.sdp);
+        break;
+      case 'candidate': await pc?.addIceCandidate(msg.candidate).catch(() => {}); break;
+      case 'stopped': case 'sender-left': if (mjpeg) break; pc?.close(); pc = null; video.srcObject = null; say('Mac 已停止推流，等待重新开始…'); break;
+    }
+  };
+  es.onerror = () => {
+    // 信令断了不影响已经连上的视频（免费隧道换网址时会这样），画面照常显示
+    if (pc?.connectionState === 'connected' || mjpeg) { mode.includes('（') || (mode += '（信令已断，画面不受影响）'); return; }
+    if (es.readyState === EventSource.CLOSED) { say('无法连接 Mac（口令错误或服务未运行），5 秒后重试…'); setTimeout(connect, 5000); }
+    else say('与 Mac 的连接断开，正在重连…');
+  };
+}
+connect();
+</script>
+</body>
+</html>
