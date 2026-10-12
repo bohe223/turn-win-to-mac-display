@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-i18n-title="viewerTitle">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mac 显示器</title>
+<title>Mac Display</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   video, #img { width: 100vw; height: 100vh; object-fit: contain; display: block; }
@@ -23,16 +23,22 @@
   #stats { position: fixed; top: 8px; right: 10px; color: #8f8; font: 12px Consolas, monospace;
     background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 4px; transition: opacity .5s; }
   body.idle #stats { opacity: 0; }
+  #langBtn { position: fixed; bottom: 10px; right: 12px; background: rgba(255,255,255,.12); color: #ddd; border: 0;
+    border-radius: 6px; padding: 5px 10px; font: 13px "Segoe UI", sans-serif; cursor: pointer; transition: opacity .5s; }
+  body.playing.idle #langBtn { opacity: 0; pointer-events: none; }
 </style>
 </head>
 <body>
 <video id="v" autoplay muted playsinline></video>
 <img id="img" alt="">
-<div id="overlay"><div id="msg">正在连接…</div><button id="fs">全屏显示</button></div>
+<div id="overlay"><div id="msg"></div><button id="fs" data-i18n="fullscreen"></button></div>
 <div id="stats"></div>
-<div id="hint">双击或按 F 全屏 · Esc 退出</div>
+<div id="hint" data-i18n="hint"></div>
+<button id="langBtn" data-i18n="switchLang"></button>
+<script src="i18n.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
+const t = (k, v) => i18n.t(k, v);
 const key = new URLSearchParams(location.search).get('k') || '';
 const video = $('v');
 let myId = null, pc = null, fallbackTimer = null;
@@ -50,19 +56,20 @@ async function currentPath(pc) {
   const l = st.get(pair.localCandidateId), rm = st.get(pair.remoteCandidateId);
   const relay = l?.candidateType === 'relay' || rm?.candidateType === 'relay';
   const lan = !relay && l?.candidateType === 'host' && rm?.candidateType === 'host';
-  return { label: relay ? 'TURN 中转' : lan ? '局域网直连' : '跨网直连',
-           detail: `本端 ${l?.candidateType}/${l?.protocol} ⇄ 对端 ${rm?.candidateType}/${rm?.protocol}${l?.relayProtocol ? '（TURN 走 ' + l.relayProtocol + '）' : ''}` };
+  return { label: relay ? 'pathRelay' : lan ? 'pathLan' : 'pathDirect', // i18n key
+           detail: `local ${l?.candidateType}/${l?.protocol} <-> remote ${rm?.candidateType}/${rm?.protocol}${l?.relayProtocol ? ' (TURN over ' + l.relayProtocol + ')' : ''}` };
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const vlog = (text) => { console.log(text); myId && post({ type: 'log', text }); };
 
 // 帧率统计（右上角显示当前模式和帧率，方便判断）
-let frames = 0, mode = '连接中';
+let frames = 0, mode = 'modeConnecting', signalLost = false; // mode 是 i18n key
+const modeText = () => t(mode) + (signalLost ? t('signalLost') : '');
 // 每秒从 WebRTC 统计里算出各环节延迟，显示在右上角；每 10 秒写一次服务器日志
 let prevIn = null, statTicks = 0;
 setInterval(async () => {
-  let text = `${mode} · ${frames} fps`;
+  let text = `${modeText()} · ${frames} fps`;
   if (pc && pc.connectionState === 'connected') {
     const st = await pc.getStats().catch(() => null);
     let inb = null, pair = null;
@@ -80,9 +87,9 @@ setInterval(async () => {
       const fps = inb.framesPerSecond || n;
       // 估算：采集约 1 帧 + 网络单程(RTT/2) + 缓冲 + 解码 + 显示约 1 帧（不含 Mac 编码，通常几毫秒）
       const est = 1000 / Math.max(fps, 1) * 2 + (rtt ?? 0) / 2 + jb + dec;
-      text = `${mode} · ${inb.frameWidth}×${inb.frameHeight} ${Math.round(fps)}fps · ${mbps.toFixed(1)}Mbps`
-        + ` · 往返 ${rtt != null ? Math.round(rtt) : '?'}ms · 缓冲 ${Math.round(jb)}ms · 解码 ${dec.toFixed(1)}ms · 估算总延迟 ≈${Math.round(est)}ms`;
-      if (++statTicks % 10 === 0) vlog('[接收统计] ' + text + ` · 丢包 ${inb.packetsLost} · 解码器 ${inb.decoderImplementation || '?'}`);
+      text = `${modeText()} · ${inb.frameWidth}×${inb.frameHeight} ${Math.round(fps)}fps · ${mbps.toFixed(1)}Mbps`
+        + ` · ${t('statRtt')} ${rtt != null ? Math.round(rtt) : '?'}ms · ${t('statBuffer')} ${Math.round(jb)}ms · ${t('statDecode')} ${dec.toFixed(1)}ms · ${t('statLatency')} ≈${Math.round(est)}ms`;
+      if (++statTicks % 10 === 0) vlog(`[recv] ${i18n.t(mode)} · ${inb.frameWidth}x${inb.frameHeight} ${Math.round(fps)}fps · ${mbps.toFixed(1)}Mbps · RTT ${rtt != null ? Math.round(rtt) : '?'}ms · buffer ${Math.round(jb)}ms · decode ${dec.toFixed(1)}ms · ~${Math.round(est)}ms · lost ${inb.packetsLost} · decoder ${inb.decoderImplementation || '?'}`);
     }
     if (inb) prevIn = inb;
   }
@@ -96,12 +103,12 @@ setInterval(async () => {
 // 备用模式：循环向 Mac 要"最新一帧"，拿到一帧再要下一帧，不会在慢速网络里堆积旧画面
 async function startMjpeg(reason) {
   if (document.body.classList.contains('mjpeg')) return;
-  vlog('切换到备用模式，原因：' + reason);
-  mjpeg = true; mode = '备用模式';
+  vlog('switching to fallback mode: ' + reason);
+  mjpeg = true; mode = 'modeFallback';
   clearTimeout(fallbackTimer);
   pc?.close(); pc = null; video.srcObject = null;
   document.body.classList.add('mjpeg');
-  say('备用模式：等待 Mac 推流…');
+  say('fbWaiting');
   const img = $('img');
   const pollId = Math.random().toString(36).slice(2);
   let after = 0, prevUrl = null;
@@ -117,14 +124,18 @@ async function startMjpeg(reason) {
         frames++;
         document.body.classList.add('playing');
       } else if (r.status !== 204) {
-        say('备用模式：连接 Mac 出错（' + r.status + '），重试中…'); await sleep(2000);
+        say('fbError', { s: r.status }); await sleep(2000);
       }
-    } catch { say('备用模式：网络中断，重试中…'); await sleep(2000); }
+    } catch { say('fbNetwork'); await sleep(2000); }
   }
 }
 
 const post = (msg) => fetch('/signal?k=' + encodeURIComponent(key), { method: 'POST', body: JSON.stringify({ ...msg, to: 'sender', from: myId }) });
-const say = (t) => { $('msg').textContent = t; document.body.classList.remove('playing'); };
+// say(key, vars)：显示状态文字；记住 key，切换语言时重新渲染
+let lastSay = ['connecting'];
+const say = (key, vars) => { lastSay = [key, vars]; $('msg').textContent = t(key, vars); document.body.classList.remove('playing'); };
+$('langBtn').onclick = () => i18n.toggle();
+i18n.onChange(() => { $('msg').textContent = t(...lastSay); });
 
 function goFullscreen() { document.documentElement.requestFullscreen?.().catch(() => {}); }
 $('fs').onclick = goFullscreen;
@@ -146,7 +157,7 @@ async function checkPath(conn) {
   const p = await currentPath(conn).catch(() => null);
   if (p) {
     mode = p.label;
-    if (p.detail !== lastPath) { lastPath = p.detail; vlog(`连接路径: ${p.label} — ${p.detail}`); }
+    if (p.detail !== lastPath) { lastPath = p.detail; vlog(`path: ${i18n.t(p.label)} — ${p.detail}`); }
   }
   setTimeout(() => checkPath(conn), 5000);
 }
@@ -159,8 +170,8 @@ async function handleOffer(sdp) {
   pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: relayOnly ? 'relay' : 'all' });
   pc.onicecandidate = (e) => e.candidate
     ? post({ type: 'candidate', candidate: e.candidate })
-    : vlog('本机网络候选收集完毕');
-  pc.onicecandidateerror = (e) => vlog(`STUN 出错 ${e.url || ''} ${e.errorCode} ${e.errorText || ''}`);
+    : vlog('ICE gathering complete');
+  pc.onicecandidateerror = (e) => vlog(`STUN/TURN error ${e.url || ''} ${e.errorCode} ${e.errorText || ''}`);
   pc.ontrack = (e) => {
     // 尽量降低延迟
     try { e.receiver.jitterBufferTarget = 0; } catch {}
@@ -169,13 +180,13 @@ async function handleOffer(sdp) {
     video.play().catch(() => {});
     document.body.classList.add('playing');
   };
-  pc.oniceconnectionstatechange = () => vlog('ICE 状态: ' + pc.iceConnectionState);
+  pc.oniceconnectionstatechange = () => vlog('ICE: ' + pc.iceConnectionState);
   pc.onconnectionstatechange = () => {
-    vlog('WebRTC 状态: ' + pc.connectionState);
+    vlog('WebRTC: ' + pc.connectionState);
     if (pc.connectionState === 'connected') checkPath(pc);
     if (pc.connectionState === 'connected') clearTimeout(fallbackTimer);
     if (pc.connectionState === 'failed') startMjpeg('WebRTC failed');
-    if (pc.connectionState === 'disconnected') say('连接中断，等待恢复…');
+    if (pc.connectionState === 'disconnected') say('interrupted');
   };
   await pc.setRemoteDescription(sdp);
   await pc.setLocalDescription(await pc.createAnswer());
@@ -184,29 +195,32 @@ async function handleOffer(sdp) {
 
 function connect() {
   const es = new EventSource('/events?k=' + encodeURIComponent(key));
+  es.onopen = () => { signalLost = false; };
   es.onmessage = async (e) => {
     const msg = JSON.parse(e.data);
     switch (msg.type) {
-      case 'hello': myId = msg.id; if (mjpeg) startMjpeg('forced'); else say(msg.senderOnline ? '等待 Mac 开始推流…' : 'Mac 端推流页面未打开'); break;
+      case 'hello': myId = msg.id; if (mjpeg) startMjpeg('forced'); else say(msg.senderOnline ? 'waitStart' : 'senderClosed'); break;
       case 'offer':
         if (mjpeg) break;
-        say('正在建立连接…');
+        say('establishing');
         // WebRTC 20 秒内连不上（含 TURN 中转）（直连线上常见），自动改用备用模式
         clearTimeout(fallbackTimer);
         fallbackTimer = setTimeout(() => pc?.connectionState !== 'connected' && startMjpeg('timeout'), 20000);
         await handleOffer(msg.sdp);
         break;
       case 'candidate': await pc?.addIceCandidate(msg.candidate).catch(() => {}); break;
-      case 'stopped': case 'sender-left': if (mjpeg) break; pc?.close(); pc = null; video.srcObject = null; say('Mac 已停止推流，等待重新开始…'); break;
+      case 'stopped': case 'sender-left': if (mjpeg) break; pc?.close(); pc = null; video.srcObject = null; say('stopped'); break;
     }
   };
   es.onerror = () => {
     // 信令断了不影响已经连上的视频（免费隧道换网址时会这样），画面照常显示
-    if (pc?.connectionState === 'connected' || mjpeg) { mode.includes('（') || (mode += '（信令已断，画面不受影响）'); return; }
-    if (es.readyState === EventSource.CLOSED) { say('无法连接 Mac（口令错误或服务未运行），5 秒后重试…'); setTimeout(connect, 5000); }
-    else say('与 Mac 的连接断开，正在重连…');
+    if (pc?.connectionState === 'connected' || mjpeg) { signalLost = true; return; }
+    if (es.readyState === EventSource.CLOSED) { say('cantReach'); setTimeout(connect, 5000); }
+    else say('reconnecting');
   };
 }
+i18n.apply();
+say('connecting');
 connect();
 </script>
 </body>

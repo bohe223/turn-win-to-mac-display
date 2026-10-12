@@ -42,10 +42,10 @@ async function getIceServers() {
     // 去掉 53 端口的地址：浏览器里常超时
     iceCache = [].concat(iceServers).map((s) => ({ ...s, urls: [].concat(s.urls).filter((u) => !/:53(\?|$)/.test(u)) }));
     iceCacheAt = Date.now();
-    log('已获取 Cloudflare TURN 凭证');
+    log('Got Cloudflare TURN credentials / 已获取 TURN 凭证');
     return iceCache;
   } catch (e) {
-    log('获取 Cloudflare TURN 凭证失败，只用 STUN：', e.message);
+    log('Failed to get TURN credentials, using STUN only / 获取 TURN 凭证失败:', e.message);
     return STUN_ONLY;
   }
 }
@@ -54,7 +54,7 @@ function notifyPollers() {
   const now = Date.now();
   for (const [id, t] of pollers) if (now - t > 5000) pollers.delete(id);
   if (pollers.size !== lastPollerCount) {
-    log(`备用模式观看端: ${pollers.size} 个`);
+    log(`fallback-mode viewers: ${pollers.size}`);
     lastPollerCount = pollers.size;
     if (sender) sse(sender.res, { type: 'mjpeg', count: pollers.size });
   }
@@ -96,7 +96,7 @@ const handler = (req, res) => {
       sender = { res };
       sse(res, { type: 'viewers', ids: [...viewers.keys()] });
       sse(res, { type: 'mjpeg', count: pollers.size });
-      log('推流端已连接');
+      log('sender connected / 推流端已连接');
       req.on('close', () => {
         if (sender?.res === res) {
           sender = null;
@@ -109,7 +109,7 @@ const handler = (req, res) => {
       openSSE(req, res);
       viewers.set(id, { res });
       sse(res, { type: 'hello', id, senderOnline: !!sender });
-      log(`观看端加入 ${id.slice(0, 8)}（来自${req.socket.localPort === TUNNEL_PORT ? '公网隧道' : ' ' + req.socket.remoteAddress}）`);
+      log(`viewer joined / 观看端加入 ${id.slice(0, 8)} (via ${req.socket.localPort === TUNNEL_PORT ? 'tunnel' : req.socket.remoteAddress})`);
       if (sender) sse(sender.res, { type: 'viewer-joined', id });
       req.on('close', () => {
         viewers.delete(id);
@@ -171,13 +171,13 @@ const handler = (req, res) => {
       try { msg = JSON.parse(body); } catch { return res.writeHead(400).end(); }
       if (msg.to === 'log') {
         if (!isLocal(req)) return res.writeHead(403).end();
-        log(`[Mac 推流端] ${String(msg.text).slice(0, 300)}`);
+        log(`[sender] ${String(msg.text).slice(0, 300)}`);
         return res.writeHead(204).end();
       }
       if (msg.to === 'sender') {
         // 观看端 -> 推流端
         if (!keyOk(url.searchParams.get('k')) || !viewers.has(msg.from)) return res.writeHead(403).end();
-        if (msg.type === 'log') { log(`[观看端 ${msg.from.slice(0, 8)}] ${String(msg.text).slice(0, 300)}`); return res.writeHead(204).end(); }
+        if (msg.type === 'log') { log(`[viewer ${msg.from.slice(0, 8)}] ${String(msg.text).slice(0, 300)}`); return res.writeHead(204).end(); }
         if (sender) sse(sender.res, msg);
       } else {
         // 推流端 -> 某个观看端
@@ -192,7 +192,7 @@ const handler = (req, res) => {
 
   // 静态文件
   let file = url.pathname === '/' ? '/viewer.html' : url.pathname;
-  if (file === '/sender.html' && !isLocal(req)) return res.writeHead(403).end('sender 只能在 Mac 本机打开');
+  if (file === '/sender.html' && !isLocal(req)) return res.writeHead(403).end('The sender page only works on this computer (localhost).');
   if (file === '/info' && isLocal(req)) {
     return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ urls: viewerUrls().map((u) => u.split(' ')[0]), publicUrl: publicUrl(), turn: !!TURN_KEY_ID }));
   }
@@ -214,7 +214,7 @@ function viewerUrls() {
     .flatMap(([name, list]) => list.map((i) => ({ name, ...i })))
     .filter((i) => i.family === 'IPv4' && !i.internal)
     .map((i) => {
-      const via = i.name === 'en0' ? 'Wi-Fi' : i.name.startsWith('bridge') ? '雷电/USB4 线' : i.address.startsWith('169.254.') ? '直连线（自动地址）' : '有线/USB 网卡';
+      const via = i.name === 'en0' ? 'Wi-Fi' : i.name.startsWith('bridge') ? 'Thunderbolt/USB4' : i.address.startsWith('169.254.') ? 'direct cable' : 'Ethernet/USB';
       return `http://${i.address}:${PORT}/?k=${KEY}   ← ${via} (${i.name})`;
     });
 }

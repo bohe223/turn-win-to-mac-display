@@ -212,7 +212,7 @@ TUNNEL=cloudflared ./start.sh
 到「系统设置 → 隐私与安全性 → 屏幕录制」允许 Chrome，然后**重启 Chrome**。
 
 **找不到「Windows Display」**
-确认终端里有「✅ 虚拟显示器已创建」这一行。如果编译失败，先运行 `xcode-select --install` 安装命令行工具。
+确认终端里有「✅ Virtual display created / 虚拟显示器已创建」这一行。如果编译失败，先运行 `xcode-select --install` 安装命令行工具。
 
 **想降低延迟**
 在推流页面保持「清晰优先」、60 帧即可。移动鼠标时，Windows 画面右上角会显示往返时间、缓冲、解码各花了多少毫秒。延迟主要取决于网络：同一局域网最快，TURN 中转会多几十毫秒。
@@ -226,6 +226,7 @@ TUNNEL=cloudflared ./start.sh
 
 - 虚拟显示器使用 macOS 的**私有接口** `CGVirtualDisplay`（[DeskPad](https://github.com/Stengo/DeskPad)、BetterDisplay 也在用）。未来的 macOS 更新可能让它失效。
 - 推流端需要电脑版 Chrome（或 Edge）。
+- 界面支持中文和英文，默认跟随浏览器语言，页面上可以手动切换。
 - 免费的 localhost.run 隧道会不定时更换网址。想要固定网址，需要自己的域名和隧道服务。
 - 每个观看端单独编码一路视频，观看的人越多，Mac 的上传带宽占用越大。
 

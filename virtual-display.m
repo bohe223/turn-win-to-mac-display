@@ -45,7 +45,7 @@ int main(int argc, const char *argv[]) {
     Class setCls = NSClassFromString(@"CGVirtualDisplaySettings");
     Class modeCls = NSClassFromString(@"CGVirtualDisplayMode");
     if (!descCls || !dispCls || !setCls || !modeCls) {
-      fprintf(stderr, "当前 macOS 不支持 CGVirtualDisplay\n");
+      fprintf(stderr, "CGVirtualDisplay is not available on this macOS / 当前 macOS 不支持虚拟显示器\n");
       return 1;
     }
 
@@ -59,18 +59,18 @@ int main(int argc, const char *argv[]) {
     desc.productID = 0x1234;
     desc.vendorID = 0x3456;
     desc.serialNum = 0x0001;
-    desc.terminationHandler = ^(id a, id b) { fprintf(stderr, "虚拟显示器已被系统终止\n"); exit(0); };
+    desc.terminationHandler = ^(id a, id b) { fprintf(stderr, "Virtual display was terminated by the system / 虚拟显示器已被系统终止\n"); exit(0); };
 
     gDisplay = [[dispCls alloc] initWithDescriptor:desc];
-    if (!gDisplay) { fprintf(stderr, "创建虚拟显示器失败\n"); return 1; }
+    if (!gDisplay) { fprintf(stderr, "Failed to create the virtual display / 创建虚拟显示器失败\n"); return 1; }
 
     CGVirtualDisplaySettings *settings = [[setCls alloc] init];
     settings.hiDPI = hidpi ? 1 : 0;
     settings.modes = @[ [[modeCls alloc] initWithWidth:w height:h refreshRate:60] ];
-    if (![gDisplay applySettings:settings]) { fprintf(stderr, "应用显示模式失败\n"); return 1; }
+    if (![gDisplay applySettings:settings]) { fprintf(stderr, "Failed to apply display mode / 应用显示模式失败\n"); return 1; }
 
-    printf("✅ 虚拟显示器已创建: %ux%u%s (displayID=%u)\n", w, h, hidpi ? " HiDPI" : "", gDisplay.displayID);
-    printf("   可在「系统设置 → 显示器」里调整它相对主屏的位置。按 Ctrl+C 移除。\n");
+    printf("✅ Virtual display created / 虚拟显示器已创建: %ux%u%s (displayID=%u)\n", w, h, hidpi ? " HiDPI" : "", gDisplay.displayID);
+    printf("   Arrange it in System Settings → Displays / 可在「系统设置 → 显示器」里调整位置\n");
     fflush(stdout);
 
     signal(SIGINT, SIG_DFL);

@@ -110,9 +110,9 @@ The keys live in `.turn.env`:
 
 ### Step 5 — Check it works
 
-Run `./start.sh` again; the sender page shows **TURN 已配置 ✓** (TURN configured). Once Windows connects, the top-right corner shows the connection type:
-- **局域网直连 / 跨网直连** (LAN / direct) — no TURN, no cost.
-- **TURN 中转** (TURN relay) — relayed by Cloudflare, counts toward the free tier.
+Run `./start.sh` again; the sender page shows **TURN configured ✓**. Once Windows connects, the top-right corner shows the connection type:
+- **LAN direct / Direct (internet)** — no TURN, no cost.
+- **TURN relay** — relayed by Cloudflare, counts toward the free tier.
 
 Usage is under **Realtime → TURN Server → Analytics** in the dashboard.
 
@@ -202,13 +202,13 @@ Some networks (e.g. some universities) also block Cloudflare quick tunnels; use 
 
 **Windows shows "no tunnel" / can't open** — free tunnels rotate URLs. The sender page always shows the current one (refreshes every 5 s); an already-playing stream is not affected.
 
-**Choppy video, "备用模式" (fallback) in the corner** — direct connection failed and TURN isn't configured. [Set up TURN](#setting-up-cloudflare-turn-step-by-step).
+**Choppy video, "Fallback" in the corner** — direct connection failed and TURN isn't configured. [Set up TURN](#setting-up-cloudflare-turn-step-by-step).
 
 **Permission error after clicking start** — allow Chrome in *System Settings → Privacy & Security → Screen Recording*, then **restart Chrome**.
 
-**No "Windows Display"** — check the terminal for `✅ 虚拟显示器已创建` (display created). If compilation failed, run `xcode-select --install`.
+**No "Windows Display"** — check the terminal for `✅ Virtual display created`. If compilation failed, run `xcode-select --install`.
 
-**Lower latency** — keep the default "清晰优先 Sharp" mode at 60 fps. Move the mouse on the viewer to see RTT, jitter buffer and decode times in the top-right corner. Latency is mostly network: LAN is fastest, TURN adds a few tens of ms.
+**Lower latency** — keep the default "Sharp" mode at 60 fps. Move the mouse on the viewer to see RTT, jitter buffer and decode times in the top-right corner. Latency is mostly network: LAN is fastest, TURN adds a few tens of ms.
 
 **Can Windows control the Mac?** — Not yet; display only. Move the Mac's pointer onto the virtual display.
 
@@ -220,7 +220,7 @@ Some networks (e.g. some universities) also block Cloudflare quick tunnels; use 
 - The sender needs desktop Chrome (or Edge).
 - Free localhost.run URLs rotate; a fixed URL needs your own domain and tunnel.
 - Each viewer gets its own encoded stream, so more viewers = more upload bandwidth on the Mac.
-- The UI is currently Chinese with English hints.
+- The UI is available in English and Chinese (follows the browser language; switch with the button on the page).
 
 ---
 
