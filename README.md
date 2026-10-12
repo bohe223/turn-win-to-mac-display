@@ -6,6 +6,9 @@
 
 Run one script on the Mac: a virtual display appears, a web page opens, and that page shows a URL. Open the URL in a browser on the Windows PC and it shows the Mac's virtual screen in real time — whether or not the two machines are on the same network.
 
+<p align="center"><img src="docs/demo.gif" alt="Demo: the sender page on the Mac (left) and the live stream in a Windows browser (right)" width="900"></p>
+<p align="center"><sub>Left: the sender page on the Mac. Right: what the Windows browser shows. (The streamed content here is a demo scene.)</sub></p>
+
 - 🪟 **Zero install on Windows** — Chrome / Edge is all you need (phones and tablets work too).
 - 🖥️ **A real extended display** — macOS gets a new "Windows Display" you can drag windows onto.
 - 🌐 **Works across networks** — a free public tunnel is built in; add Cloudflare TURN and it stays smooth on school, office and mobile networks.
@@ -14,6 +17,14 @@ Run one script on the Mac: a virtual display appears, a web page opens, and that
 - 📦 **Zero dependencies** — just Node.js, no `npm install`.
 
 > Just want to share an existing screen? Add `--no-display`. The server also runs on Windows / Linux; only the virtual display is macOS-specific.
+
+## Screenshots
+
+| Sender page (Mac) | Viewer (Windows browser) |
+|---|---|
+| <img src="docs/sender-en.png" alt="Sender page" width="380"> | <img src="docs/viewer-en.png" alt="Viewer with live stats" width="520"> |
+
+The viewer shows the connection type and live latency stats in the top-right corner. The UI follows the browser language (English / 中文) and can be switched manually.
 
 ---
 

@@ -6,6 +6,9 @@
 
 Mac 上运行一个脚本，会多出一块虚拟显示器，同时打开一个网页，网页上显示一个网址。在 Windows 上用浏览器打开这个网址，Mac 那块屏幕的画面就会实时显示出来。两台电脑在不在同一个网络都可以用。
 
+<p align="center"><img src="docs/demo.gif" alt="演示：左边是 Mac 上的推流页面，右边是 Windows 浏览器里的实时画面" width="900"></p>
+<p align="center"><sub>左：Mac 上的推流页面；右：Windows 浏览器里看到的画面（演示中的屏幕内容是一个演示场景）。</sub></p>
+
 - 🪟 **Windows 端零安装**：Chrome / Edge 打开网址即可，也可以用手机或平板。
 - 🖥️ **真正的扩展屏**：Mac 上多出一块「Windows Display」，可以把窗口拖过去。
 - 🌐 **跨网络可用**：自带免费公网隧道，不在同一 WiFi 也能看；配合 Cloudflare TURN 中转，在学校、公司、手机网络下也流畅。
@@ -14,6 +17,14 @@ Mac 上运行一个脚本，会多出一块虚拟显示器，同时打开一个�
 - 📦 **零依赖**：只需要 Node.js，不用 `npm install`。
 
 > 不需要扩展屏、只想共享现有屏幕？加上 `--no-display` 即可。服务端在 Windows / Linux 上也能运行，只是虚拟显示器仅支持 macOS。
+
+## 截图
+
+| 推流页面（Mac） | 观看页面（Windows 浏览器） |
+|---|---|
+| <img src="docs/sender-zh.png" alt="推流页面" width="380"> | <img src="docs/viewer-zh.png" alt="观看页面和实时统计" width="520"> |
+
+观看页面右上角会显示连接方式和实时延迟。界面语言跟随浏览器（中文 / English），也可以手动切换。
 
 ---
 
