@@ -42,7 +42,7 @@ Run one script on the Mac: a virtual display appears, a web page opens, and that
 
 **1. Get the code**
 ```bash
-git clone https://github.com/<your-username>/turn-win-to-mac-display.git
+git clone https://github.com/bohe223/turn-win-to-mac-display.git
 cd turn-win-to-mac-display
 ```
 

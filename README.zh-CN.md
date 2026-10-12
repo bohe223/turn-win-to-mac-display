@@ -42,7 +42,7 @@ Mac 上运行一个脚本，会多出一块虚拟显示器，同时打开一个�
 
 **1. 下载项目**
 ```bash
-git clone https://github.com/<你的用户名>/turn-win-to-mac-display.git
+git clone https://github.com/bohe223/turn-win-to-mac-display.git
 cd turn-win-to-mac-display
 ```
 
