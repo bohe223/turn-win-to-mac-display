@@ -41,7 +41,7 @@ command -v node >/dev/null || { echo "需要 Node.js 18+ / Node.js 18+ is requir
 
 PIDS=()
 rm -f .tunnel-url
-trap 'kill -INT "${PIDS[@]}" 2>/dev/null; rm -f .tunnel-url' EXIT
+trap 'kill "${PIDS[@]}" 2>/dev/null; rm -f .tunnel-url' EXIT
 
 # 虚拟显示器只支持 macOS / The virtual display is macOS-only
 if [ $DISPLAY_ON = 1 ] && [ "$(uname)" = Darwin ]; then
